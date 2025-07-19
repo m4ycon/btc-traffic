@@ -1,25 +1,31 @@
-use clap::Parser;
+use corepc_node::{Node, P2P};
+use std::str::FromStr;
+use std::time::Duration;
 
-#[derive(Parser, Debug)]
-#[clap(author = "Edil Medeiros", version, about)]
-/// Application configuration
-struct Args {
-    /// whether to be verbose
-    #[arg(short = 'v')]
-    verbose: bool,
+pub fn node_network() -> Vec<Node> {
+    let bitcoind_path = corepc_node::exe_path().expect("Can't find bitcoind executable");
 
-    /// an optional name to greet
-    #[arg()]
-    name: Option<String>,
+    // todo: set datadir to ramdisk folder for faster nodes.
+
+    // Node 0
+    let mut conf_node0 = corepc_node::Conf::default();
+    let external = core::net::SocketAddrV4::from_str("127.0.0.1:18444").unwrap();
+    conf_node0.p2p = P2P::Connect(external, true);
+    let node0 = Node::with_conf(&bitcoind_path, &conf_node0).unwrap();
+    node0.client.create_wallet("wallet_0").unwrap();
+
+    vec![node0]
 }
 
-fn main() {
-    let args = Args::parse();
-    if args.verbose {
-        println!("DEBUG {args:?}");
+#[tokio::main]
+async fn main() {
+    let nodes = node_network();
+
+    let miner_addr = nodes[0].client.new_address().unwrap();
+
+    loop {
+        let res = nodes[0].client.generate_to_address(1, &miner_addr).unwrap();
+        println!("{:?}", res);
+        tokio::time::sleep(Duration::from_secs(30)).await;
     }
-    println!(
-        "Hello {} (from btc-traffic)!",
-        args.name.unwrap_or("world".to_string())
-    );
 }
