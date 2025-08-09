@@ -2,13 +2,17 @@ use bitcoin::address::Address;
 use clap::Parser;
 use corepc_node as node;
 use node::{Conf, Node, P2P};
-use rand::prelude::*;
 use std::net::SocketAddrV4;
 use std::num::NonZeroU32;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
+
+use crate::utils::wallet_funds::add_wallet_funds;
+use crate::utils::self_transfer::create_self_transfer;
+
+mod utils;
 
 /// Simple regtest traffic generator for bitcoin test and development
 #[derive(Parser, Debug)]
@@ -124,6 +128,35 @@ async fn main() {
 
     let network = Network::new(&cli);
     println!("{:?}", network);
+
+    let peer = &network[0].node;
+
+    let wallet_funds = add_wallet_funds(&peer.client, None).await.unwrap();
+
+    // network maturity to make above coinbase transaction valid
+    // TODO: refactor it to make a global balance so we avoid this solution
+    for _ in 0..100 {
+      network.mine();
+    }
+
+    let balances = peer.client.get_balances().unwrap();
+    println!("Wallet balances: {:?}", balances);
+
+    let self_transfer = create_self_transfer(
+        &peer.client,
+        Some(&wallet_funds.address),
+    ).await.unwrap();
+    println!("Self transfer txid: {}", self_transfer.txid);
+
+    network.mine();
+
+    let balances = peer.client.get_balances().unwrap();
+    println!("Wallet balances: {:?}", balances);
+
+    // find txid of self transfer
+    let txid = self_transfer.txid;
+    let tx = peer.client.get_transaction(txid).unwrap();
+    println!("Self transfer tx: {:#?}", tx);
 
     loop {
         network.mine();
