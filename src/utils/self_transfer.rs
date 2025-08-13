@@ -22,18 +22,12 @@ struct UnspentOutput {
     pub safe: bool,
 }
 
-#[derive(Debug)]
-pub struct SelfTransferResult {
-    pub txid: Txid,
-    pub address: Address,
-}
-
 /// Inspired by Bitcoin Core `create_self_transfer`
 /// https://github.com/bitcoin/bitcoin/blob/master/test/functional/test_framework/wallet.py#L360
 pub async fn create_self_transfer(
     client: &Client,
     address: Option<&Address>,
-) -> Result<SelfTransferResult, Box<dyn Error>> {
+) -> Result<Transaction, Box<dyn Error>> {
     // Step 1: Generate a new address in the wallet if none provided
     let address = match address {
         Some(addr) => addr.clone(),
@@ -49,7 +43,7 @@ pub async fn create_self_transfer(
     let utxo = unspent.iter().find(|u| u.address == address.to_string()).unwrap();
     let fee = 0.0000_1000;
     let amount = Amount::from_btc(utxo.amount - fee).unwrap();
-    println!("Sending {} to {}", amount, address);
+    println!("Creating self transfer {} to {}", amount, address);
 
     let inputs = {
         vec![Input {
@@ -64,11 +58,9 @@ pub async fn create_self_transfer(
 
     // Step 3: Create raw transaction
     let raw_tx = client.create_raw_transaction(&inputs, &outputs)?;
-    println!("Raw transaction: {:?}", raw_tx);
 
     // Step 4: Sign the transaction
     let signed_tx = client.sign_raw_transaction_with_wallet(&raw_tx.transaction()?)?;
-    println!("Signed transaction hex: {}", signed_tx.hex);
     if !signed_tx.complete {
         return Err("Failed to sign transaction".into());
     }
@@ -86,8 +78,5 @@ pub async fn create_self_transfer(
     let final_tx: Transaction = bitcoin::consensus::deserialize(&tx_bytes)
         .map_err(|e| format!("Deserialization error: {}", e))?;
 
-    // Step 7: Send the transaction
-    let txid = client.send_raw_transaction(&final_tx)?.txid()?;
-
-    Ok(SelfTransferResult { txid, address })
+    Ok(final_tx)
 }

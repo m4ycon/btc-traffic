@@ -1,4 +1,5 @@
 use bitcoin::address::Address;
+use bitcoin::transaction::Version;
 use clap::Parser;
 use corepc_node as node;
 use node::{Conf, Node, P2P};
@@ -9,8 +10,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::utils::wallet_funds::add_wallet_funds;
+use crate::utils::create_block::{self, create_block};
 use crate::utils::self_transfer::create_self_transfer;
+use crate::utils::wallet_funds::add_wallet_funds;
 
 mod utils;
 
@@ -136,17 +138,35 @@ async fn main() {
     // network maturity to make above coinbase transaction valid
     // TODO: refactor it to make a global balance so we avoid this solution
     for _ in 0..100 {
-      network.mine();
+        network.mine();
     }
 
     let balances = peer.client.get_balances().unwrap();
     println!("Wallet balances: {:?}", balances);
 
-    let self_transfer = create_self_transfer(
-        &peer.client,
-        Some(&wallet_funds.address),
-    ).await.unwrap();
-    println!("Self transfer txid: {}", self_transfer.txid);
+    let mut self_transfer = create_self_transfer(&peer.client, Some(&wallet_funds.address))
+        .await
+        .unwrap();
+    self_transfer.version = Version(4);
+
+    let self_transfer_txid = peer
+        .client
+        .send_raw_transaction(&self_transfer)
+        .unwrap()
+        .txid()
+        .unwrap();
+    println!("Self transfer txid: {}", self_transfer_txid);
+
+    // TODO: add self transfer
+    let block = create_block(
+        None,
+        Some(self_transfer),
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
 
     network.mine();
 
@@ -154,8 +174,7 @@ async fn main() {
     println!("Wallet balances: {:?}", balances);
 
     // find txid of self transfer
-    let txid = self_transfer.txid;
-    let tx = peer.client.get_transaction(txid).unwrap();
+    let tx = peer.client.get_transaction(self_transfer_txid).unwrap();
     println!("Self transfer tx: {:#?}", tx);
 
     loop {
