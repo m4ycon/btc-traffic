@@ -1,17 +1,17 @@
 use bitcoin::address::Address;
-use bitcoin::transaction::Version;
+use bitcoin::{BlockHash};
 use clap::Parser;
-use corepc_node as node;
+use corepc_node::{self as node, serde_json, Client};
 use node::{Conf, Node, P2P};
 use std::net::SocketAddrV4;
 use std::num::NonZeroU32;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::utils::create_block::{self, create_block};
-use crate::utils::self_transfer::create_self_transfer;
+use crate::utils::create_block::create_block;
+use crate::utils::create_transaction::create_transaction;
 use crate::utils::wallet_funds::add_wallet_funds;
 
 mod utils;
@@ -112,13 +112,18 @@ impl Network {
         Network(network)
     }
 
-    fn mine(self: &Self) {
+    fn mine(self: &Self, nblocks: Option<usize>) {
+        let nblocks = nblocks.unwrap_or(1);
         let size = self.len();
         let n = rand::random_range(0..size);
-        println!("Mining with node {}", n);
+        println!("Mining with node {}, {} blocks", n, nblocks);
 
         let addr = &self[n].mine_addr;
-        let block = self[n].node.client.generate_to_address(1, addr).unwrap();
+        let block = self[n]
+            .node
+            .client
+            .generate_to_address(nblocks, addr)
+            .unwrap();
         println!("{:?}", block);
     }
 }
@@ -137,48 +142,66 @@ async fn main() {
 
     // network maturity to make above coinbase transaction valid
     // TODO: refactor it to make a global balance so we avoid this solution
-    for _ in 0..100 {
-        network.mine();
-    }
+    network.mine(Some(100));
 
     let balances = peer.client.get_balances().unwrap();
     println!("Wallet balances: {:?}", balances);
 
-    let mut self_transfer = create_self_transfer(&peer.client, Some(&wallet_funds.address))
+    let self_transfer = create_transaction(&peer.client, &wallet_funds.address)
         .await
         .unwrap();
-    self_transfer.version = Version(4);
 
-    let self_transfer_txid = peer
-        .client
-        .send_raw_transaction(&self_transfer)
-        .unwrap()
-        .txid()
-        .unwrap();
-    println!("Self transfer txid: {}", self_transfer_txid);
-
-    // TODO: add self transfer
     let block = create_block(
+        Some(get_prev_hash(&peer.client)),
         None,
-        Some(self_transfer),
+        Some(get_min_timestamp(&peer.client)),
         None,
-        None,
-        None,
-        None,
+        Some(serde_json::json!({"height":get_block_height(&peer.client) + 1})),
+        Some(vec![self_transfer.clone()]),
     )
     .unwrap();
+    println!("block {:?}", block);
 
-    network.mine();
+    peer.client
+        .submit_block(&block)
+        .map_err(|e| format!("Failed to submit block: {}", e))
+        .unwrap();
+
+    network.mine(None);
 
     let balances = peer.client.get_balances().unwrap();
     println!("Wallet balances: {:?}", balances);
 
     // find txid of self transfer
+    let self_transfer_txid = self_transfer.compute_txid();
     let tx = peer.client.get_transaction(self_transfer_txid).unwrap();
     println!("Self transfer tx: {:#?}", tx);
 
     loop {
-        network.mine();
+        network.mine(None);
         tokio::time::sleep(Duration::from_secs(cli.mine_interval)).await;
     }
+}
+
+fn get_min_timestamp(client: &Client) -> u32 {
+    let blockchain_info = client.get_blockchain_info().unwrap();
+    let min_timestamp = blockchain_info.median_time as u32 + 1;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as u32;
+
+    if now > min_timestamp {
+        return now;
+    }
+    min_timestamp
+}
+
+fn get_prev_hash(client: &Client) -> BlockHash {
+    client.get_best_block_hash().unwrap().block_hash().unwrap()
+}
+
+fn get_block_height(client: &Client) -> u64 {
+    client.get_block_count().unwrap().0
 }

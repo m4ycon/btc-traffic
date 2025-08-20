@@ -1,52 +1,56 @@
 use std::error::Error;
-use bitcoin::{Address, Amount, Transaction};
+use bitcoin::{Address, Amount, Sequence, Transaction, Txid};
 use corepc_node::{Client, Input, Output};
-use crate::utils::create_transaction::UnspentOutput;
+use serde::Deserialize;
 
+const DEFAULT_FEE: f64 = 0.0000_1000;
 
-/// Inspired by Bitcoin Core `create_self_transfer`
-/// https://github.com/bitcoin/bitcoin/blob/master/test/functional/test_framework/wallet.py#L360
-pub async fn create_self_transfer(
+// TODO: Remove this when corepc-types is updated
+#[derive(Debug, Deserialize)]
+pub struct UnspentOutput {
+    pub txid: String,
+    pub vout: i64,
+    pub address: String,
+    pub label: String,
+    // pub account: String, // this throws an error in original code
+    #[serde(rename = "scriptPubKey")]
+    pub script_pubkey: String,
+    pub amount: f64,
+    pub confirmations: i64,
+    #[serde(rename = "redeemScript")]
+    pub redeem_script: Option<String>,
+    pub spendable: bool,
+    pub solvable: bool,
+    pub safe: bool,
+}
+
+pub async fn create_transaction(
     client: &Client,
-    address: Option<&Address>,
+    address: &Address,
 ) -> Result<Transaction, Box<dyn Error>> {
-    // Step 1: Generate a new address in the wallet if none provided
-    let address = match address {
-        Some(addr) => addr.clone(),
-        None => client
-            .get_new_address(None, None)?
-            .address()?
-            .assume_checked(),
-    };
-
-    // Step 2: Prepare inputs for the raw transaction
     let unspent: Vec<UnspentOutput> = client.call("listunspent", &[])?;
-    let utxo = unspent.iter().find(|u| u.address == address.to_string()).unwrap();
-    let fee = 0.0000_1000;
-    let amount = Amount::from_btc(utxo.amount - fee).unwrap();
-    println!("Creating self transfer {} to {}", amount, address);
+    let utxo = unspent.first().unwrap();
+    let amount = Amount::from_btc(utxo.amount - DEFAULT_FEE).unwrap();
+    println!("Creating transfer {} to {}", amount, address);
 
     let inputs = {
         vec![Input {
             txid: utxo.txid.parse()?,
             vout: u64::try_from(utxo.vout)?,
-            sequence: None,
+            sequence: Some(Sequence::MAX),
         }]
     };
     let outputs = [
         Output::new(address.clone(), amount),
     ];
 
-    // Step 3: Create raw transaction
     let raw_tx = client.create_raw_transaction(&inputs, &outputs)?;
 
-    // Step 4: Sign the transaction
     let signed_tx = client.sign_raw_transaction_with_wallet(&raw_tx.transaction()?)?;
     if !signed_tx.complete {
         return Err("Failed to sign transaction".into());
     }
 
-    // Step 5: Validate hex string
     if signed_tx.hex.is_empty() {
         return Err("Signed transaction hex is empty".into());
     }
@@ -55,7 +59,6 @@ pub async fn create_self_transfer(
         return Err("Decoded transaction bytes are empty".into());
     }
 
-    // Step 6: Deserialize transaction
     let final_tx: Transaction = bitcoin::consensus::deserialize(&tx_bytes)
         .map_err(|e| format!("Deserialization error: {}", e))?;
 
