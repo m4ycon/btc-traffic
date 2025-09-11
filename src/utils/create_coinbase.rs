@@ -6,6 +6,15 @@ use bitcoin::opcodes::all::OP_RETURN;
 use bitcoin::opcodes::OP_TRUE;
 use bitcoin::{Amount, Sequence, Witness, Wtxid};
 
+const INITIAL_SUBSIDY: u64 = 50_0000_0000; // 50 BTC in satoshis
+const HALVING_INTERVAL: u32 = 210_000;
+
+pub fn calculate_subsidy(height: u32) -> Amount {
+    let halvings = height / HALVING_INTERVAL;
+    let subsidy_sat = INITIAL_SUBSIDY >> halvings;
+    Amount::from_sat(subsidy_sat)
+}
+
 pub fn create_coinbase(height: u32) -> Transaction {
     // Create coinbase input with height script
     let script_sig = if height <= 16 {
@@ -22,6 +31,8 @@ pub fn create_coinbase(height: u32) -> Transaction {
         .push_opcode(OP_RETURN)
         .into_script();
 
+    let value = calculate_subsidy(height);
+
     let mut tx = Transaction {
         version: bitcoin::transaction::Version::ONE,
         lock_time: bitcoin::absolute::LockTime::Blocks(Height::from_consensus(height).unwrap()),
@@ -32,8 +43,8 @@ pub fn create_coinbase(height: u32) -> Transaction {
             witness: Witness::new(),
         }],
         output: vec![TxOut {
-            value: Amount::from_btc(50.).unwrap(),
-            script_pubkey: script_pubkey,
+            value,
+            script_pubkey,
         }],
     };
 

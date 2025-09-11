@@ -26,12 +26,12 @@ pub struct UnspentOutput {
 
 pub async fn create_transaction(
     client: &Client,
-    address: &Address,
+    to_address: &Address,
 ) -> Result<Transaction, Box<dyn Error>> {
     let unspent: Vec<UnspentOutput> = client.call("listunspent", &[])?;
     let utxo = unspent.first().unwrap();
     let amount = Amount::from_btc(utxo.amount - DEFAULT_FEE).unwrap();
-    println!("Creating transfer {} to {}", amount, address);
+    println!("Creating transfer {} to {}", amount, to_address);
 
     let inputs = {
         vec![Input {
@@ -41,7 +41,7 @@ pub async fn create_transaction(
         }]
     };
     let outputs = [
-        Output::new(address.clone(), amount),
+        Output::new(to_address.clone(), amount),
     ];
 
     let raw_tx = client.create_raw_transaction(&inputs, &outputs)?;

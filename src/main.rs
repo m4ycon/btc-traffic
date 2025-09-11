@@ -91,7 +91,11 @@ impl DerefMut for Network {
 
 impl Network {
     fn new(cli: &Cli) -> Network {
-        let bitcoind_path = node::exe_path().expect("Can't find bitcoind executable");
+        let bitcoind_path = cli
+            .bitcoind_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| node::exe_path().expect("Can't find bitcoind executable"));
         let n = cli.nodes.get();
         let mut network = Vec::with_capacity(n as usize);
 
@@ -125,6 +129,14 @@ impl Network {
             .generate_to_address(nblocks, addr)
             .unwrap();
         println!("{:?}", block);
+
+        // wait all nodes sync
+        while self.iter().any(|i| {
+            let height = i.node.client.get_block_count().unwrap().0;
+            height < get_block_height(&self[n].node.client)
+        }) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 }
 
@@ -160,7 +172,7 @@ async fn main() {
         Some(vec![self_transfer.clone()]),
     )
     .unwrap();
-    println!("block {:?}", block);
+    println!("block {:?}", &block);
 
     peer.client
         .submit_block(&block)
