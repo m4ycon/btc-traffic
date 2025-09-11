@@ -7,7 +7,7 @@ use bitcoin::opcodes::OP_TRUE;
 use bitcoin::{Amount, Sequence, Witness, Wtxid};
 
 const INITIAL_SUBSIDY: u64 = 50_0000_0000; // 50 BTC in satoshis
-const HALVING_INTERVAL: u32 = 210_000;
+const HALVING_INTERVAL: u32 = 150;
 
 pub fn calculate_subsidy(height: u32) -> Amount {
     let halvings = height / HALVING_INTERVAL;
