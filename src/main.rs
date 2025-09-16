@@ -7,10 +7,9 @@ use std::num::NonZeroU32;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::{Duration};
+use std::time::Duration;
 
-use crate::utils::create_block::create_block;
-use crate::utils::create_transaction::create_transaction;
+use crate::utils::mutated_block::create_mutated_block_1;
 use crate::utils::wallet_funds::add_wallet_funds;
 
 mod utils;
@@ -155,33 +154,14 @@ async fn main() {
     // TODO: refactor it to make a global balance so we avoid this solution
     network.mine(Some(100));
 
-    let balances = peer.client.get_balances().unwrap();
-    println!("Wallet balances: {:?}", balances);
-
-    let self_transfer = create_transaction(&peer.client, &wallet_funds.address)
+    let mutated_block = create_mutated_block_1(&peer.client, &wallet_funds.address)
         .await
         .unwrap();
 
-    let block = create_block(
-        &peer.client,
-        Some(vec![self_transfer.clone()]),
-    )
-    .unwrap();
-
     peer.client
-        .submit_block(&block)
+        .submit_block(&mutated_block)
         .map_err(|e| format!("Failed to submit block: {}", e))
         .unwrap();
-
-    network.mine(None);
-
-    let balances = peer.client.get_balances().unwrap();
-    println!("Wallet balances: {:?}", balances);
-
-    // find txid of self transfer
-    let self_transfer_txid = self_transfer.compute_txid();
-    let tx = peer.client.get_transaction(self_transfer_txid).unwrap();
-    println!("Self transfer tx: {:#?}", tx);
 
     loop {
         network.mine(None);
