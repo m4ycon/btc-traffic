@@ -1,14 +1,13 @@
 use bitcoin::address::Address;
-use bitcoin::{BlockHash};
 use clap::Parser;
-use corepc_node::{self as node, serde_json, Client};
+use corepc_node::{self as node};
 use node::{Conf, Node, P2P};
 use std::net::SocketAddrV4;
 use std::num::NonZeroU32;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration};
 
 use crate::utils::create_block::create_block;
 use crate::utils::create_transaction::create_transaction;
@@ -133,7 +132,7 @@ impl Network {
         // wait all nodes sync
         while self.iter().any(|i| {
             let height = i.node.client.get_block_count().unwrap().0;
-            height < get_block_height(&self[n].node.client)
+            height < self[n].node.client.get_block_count().unwrap().0
         }) {
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -164,15 +163,10 @@ async fn main() {
         .unwrap();
 
     let block = create_block(
-        Some(get_prev_hash(&peer.client)),
-        None,
-        Some(get_min_timestamp(&peer.client)),
-        None,
-        Some(serde_json::json!({"height":get_block_height(&peer.client) + 1})),
+        &peer.client,
         Some(vec![self_transfer.clone()]),
     )
     .unwrap();
-    println!("block {:?}", &block);
 
     peer.client
         .submit_block(&block)
@@ -193,27 +187,4 @@ async fn main() {
         network.mine(None);
         tokio::time::sleep(Duration::from_secs(cli.mine_interval)).await;
     }
-}
-
-fn get_min_timestamp(client: &Client) -> u32 {
-    let blockchain_info = client.get_blockchain_info().unwrap();
-    let min_timestamp = blockchain_info.median_time as u32 + 1;
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as u32;
-
-    if now > min_timestamp {
-        return now;
-    }
-    min_timestamp
-}
-
-fn get_prev_hash(client: &Client) -> BlockHash {
-    client.get_best_block_hash().unwrap().block_hash().unwrap()
-}
-
-fn get_block_height(client: &Client) -> u64 {
-    client.get_block_count().unwrap().0
 }

@@ -6,7 +6,7 @@ use bitcoin::hashes::{sha256d, Hash};
 use bitcoin::opcodes::all::OP_RETURN;
 use bitcoin::script::{Builder, PushBytesBuf};
 use bitcoin::{CompactTarget, TxMerkleNode};
-use corepc_node::{serde_json, Error};
+use corepc_node::{Client, Error};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::utils::create_coinbase::create_coinbase;
@@ -18,19 +18,12 @@ const REGTEST_DIFFICULTY: u32 = 0x207fffff;
 const COMMITMENT_HEADER: [u8; 4] = [0xaa, 0x21, 0xa9, 0xed];
 
 pub fn create_block(
-    hashprev: Option<BlockHash>,
-    coinbase: Option<Transaction>,
-    ntime: Option<u32>,
-    version: Option<Version>,
-    tmpl: Option<serde_json::Value>,
+    client: &Client,
     txlist: Option<Vec<Transaction>>,
 ) -> Result<Block, Error> {
     // Create coinbase transaction if not provided
-    let height = tmpl
-        .as_ref()
-        .and_then(|t| t.get("height").and_then(|h| h.as_u64()))
-        .unwrap_or(1) as u32;
-    let coinbase = coinbase.unwrap_or_else(|| create_coinbase(height));
+    let height = (get_block_height(client) + 1) as u32;
+    let coinbase = create_coinbase(height);
 
     // Collect transactions
     let mut transactions = vec![coinbase];
@@ -40,38 +33,11 @@ pub fn create_block(
 
     // Initialize block header
     let header = bitcoin::block::Header {
-        version: version.unwrap_or_else(|| {
-            tmpl.as_ref()
-                .and_then(|t| {
-                    t.get("version")
-                        .and_then(|v| v.as_i64())
-                        .map(|v| Version::from_consensus(v as i32))
-                })
-                .unwrap_or(Version::from_consensus(VERSIONBITS_LAST_OLD_BLOCK_VERSION))
-        }),
-        prev_blockhash: hashprev.unwrap_or_else(|| {
-            tmpl.as_ref()
-                .and_then(|t| t.get("previousblockhash").and_then(|h| h.as_str()))
-                .and_then(|h| h.parse::<BlockHash>().ok())
-                .unwrap_or_else(|| BlockHash::all_zeros())
-        }),
+        version: Version::from_consensus(VERSIONBITS_LAST_OLD_BLOCK_VERSION),
+        prev_blockhash: get_prev_hash(client),
         merkle_root: TxMerkleNode::all_zeros(), // fill in later
-        time: ntime.unwrap_or_else(|| {
-            tmpl.as_ref()
-                .and_then(|t| t.get("curtime").and_then(|t| t.as_u64()).map(|t| t as u32))
-                .unwrap_or_else(|| {
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs() as u32
-                        + 600
-                })
-        }),
-        bits: tmpl
-            .as_ref()
-            .and_then(|t| t.get("bits").and_then(|b| b.as_str()))
-            .and_then(|b| CompactTarget::from_hex(b).ok())
-            .unwrap_or(CompactTarget::from_consensus(REGTEST_DIFFICULTY)),
+        time: get_min_timestamp(client),
+        bits: CompactTarget::from_consensus(REGTEST_DIFFICULTY),
         nonce: 0, // Set to 0 for now; adjust if mining is needed
     };
 
@@ -110,4 +76,27 @@ fn prepare_commitment(block: &mut Block) -> () {
         .push_opcode(OP_RETURN)
         .push_slice(PushBytesBuf::try_from(witness_bytes).unwrap())
         .into_script();
+}
+
+fn get_min_timestamp(client: &Client) -> u32 {
+    let blockchain_info = client.get_blockchain_info().unwrap();
+    let min_timestamp = blockchain_info.median_time as u32 + 1;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as u32;
+
+    if now > min_timestamp {
+        return now;
+    }
+    min_timestamp
+}
+
+fn get_prev_hash(client: &Client) -> BlockHash {
+    client.get_best_block_hash().unwrap().block_hash().unwrap()
+}
+
+fn get_block_height(client: &Client) -> u64 {
+    client.get_block_count().unwrap().0
 }

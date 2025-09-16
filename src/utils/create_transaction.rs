@@ -1,9 +1,9 @@
 use std::error::Error;
-use bitcoin::{Address, Amount, Sequence, Transaction, Txid};
+use bitcoin::{Address, Amount, Sequence, Transaction};
 use corepc_node::{Client, Input, Output};
 use serde::Deserialize;
 
-const DEFAULT_FEE: f64 = 0.0000_1000;
+const DEFAULT_FEE: u64 = 1000; // in satoshis
 
 // TODO: Remove this when corepc-types is updated
 #[derive(Debug, Deserialize)]
@@ -30,7 +30,8 @@ pub async fn create_transaction(
 ) -> Result<Transaction, Box<dyn Error>> {
     let unspent: Vec<UnspentOutput> = client.call("listunspent", &[])?;
     let utxo = unspent.first().unwrap();
-    let amount = Amount::from_btc(utxo.amount - DEFAULT_FEE).unwrap();
+    let utxo_sat = (utxo.amount * Amount::ONE_BTC.to_sat() as f64).round() as u64;
+    let amount = Amount::from_sat(utxo_sat - DEFAULT_FEE);
     println!("Creating transfer {} to {}", amount, to_address);
 
     let inputs = {
