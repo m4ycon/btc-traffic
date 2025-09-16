@@ -48,13 +48,8 @@ pub fn create_block(
     };
 
     prepare_commitment(&mut block);
-    block.header.merkle_root = block.compute_merkle_root().unwrap();
-
-    // Compute target
-    let target = block.header.target();
-    while !block.header.validate_pow(target).is_ok() {
-        block.header.nonce += 1;
-    }
+    update_merkle_root(&mut block);
+    mine_block(&mut block);
 
     Ok(block)
 }
@@ -99,4 +94,15 @@ fn get_prev_hash(client: &Client) -> BlockHash {
 
 fn get_block_height(client: &Client) -> u64 {
     client.get_block_count().unwrap().0
+}
+
+pub fn mine_block(block: &mut Block) {
+    let target = block.header.target();
+    while !block.header.validate_pow(target).is_ok() {
+        block.header.nonce += 1;
+    }
+}
+
+pub fn update_merkle_root(block: &mut Block) -> () {
+    block.header.merkle_root = block.compute_merkle_root().unwrap();
 }
