@@ -1,13 +1,11 @@
 use bitcoin::blockdata::block::Block;
 use bitcoin::hashes::Hash;
-use bitcoin::opcodes::OP_TRUE;
-use bitcoin::transaction::Version;
-use bitcoin::{Amount, Sequence};
 use bitcoin::{opcodes::all::OP_RETURN, script::Builder, Address};
 use corepc_node::{Client, Error};
 
 use crate::utils::create_block::{mine_block, update_merkle_root};
-use crate::utils::{create_block::create_block, create_transaction::create_transaction};
+use crate::utils::create_transaction::{create_many_self_transactions, create_self_transactions};
+use crate::utils::{create_block::create_block};
 
 pub async fn create_mutated_block_1(client: &Client, to_address: &Address) -> Result<Block, Error> {
     // just logged by btc-core in debug=validation mode
@@ -25,11 +23,31 @@ pub async fn create_mutated_block_1(client: &Client, to_address: &Address) -> Re
 }
 
 pub async fn create_mutated_block_2(client: &Client, to_address: &Address) -> Result<Block, Error> {
-    let block = create_mutated_block(client, to_address, "bad-txns-duplicate", |block| todo!())
-        .await
-        .unwrap();
+    // cant submit it even with mutated block errors commented, as it still fails with "bad-txns-inputs-missingorspent"
+    let self_transfers = create_many_self_transactions(client, to_address, 2).await.unwrap();
 
-    Ok(block)
+    let valid_block = create_block(
+        &client,
+        Some(vec![
+            self_transfers[0].clone(),
+            self_transfers[1].clone(),
+        ])
+    ).unwrap();
+
+    let mutated_block = create_block(
+        &client,
+        Some(vec![
+            self_transfers[0].clone(),
+            self_transfers[1].clone(),
+            self_transfers[1].clone(),
+        ])
+    ).unwrap();
+
+    assert!(valid_block.header.merkle_root == mutated_block.header.merkle_root);
+
+    println!("Mutated block hash ({}): {}", "bad-txns-duplicate", valid_block.block_hash());
+
+    Ok(mutated_block)
 }
 
 pub async fn create_mutated_block_3(client: &Client, to_address: &Address) -> Result<Block, Error> {
@@ -81,7 +99,7 @@ async fn create_mutated_block(
     mutate_message: &str,
     mutate_callback: fn(&mut Block) -> Result<(), Error>,
 ) -> Result<Block, Error> {
-    let self_transfer = create_transaction(client, to_address).await.unwrap();
+    let self_transfer = create_self_transactions(client, to_address).await.unwrap();
 
     let mut block = create_block(&client, Some(vec![self_transfer.clone()])).unwrap();
 

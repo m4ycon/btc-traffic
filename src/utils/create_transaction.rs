@@ -1,7 +1,7 @@
-use std::error::Error;
 use bitcoin::{Address, Amount, Sequence, Transaction};
 use corepc_node::{Client, Input, Output};
 use serde::Deserialize;
+use std::error::Error;
 
 const DEFAULT_FEE: u64 = 1000; // in satoshis
 
@@ -24,16 +24,43 @@ pub struct UnspentOutput {
     pub safe: bool,
 }
 
-pub async fn create_transaction(
+pub async fn create_self_transactions(
     client: &Client,
     to_address: &Address,
 ) -> Result<Transaction, Box<dyn Error>> {
-    let unspent: Vec<UnspentOutput> = client.call("listunspent", &[])?;
-    let utxo = unspent.first().unwrap();
-    let utxo_sat = (utxo.amount * Amount::ONE_BTC.to_sat() as f64).round() as u64;
-    let amount = Amount::from_sat(utxo_sat - DEFAULT_FEE);
-    println!("Creating transfer {} to {}", amount, to_address);
+    let transactions = create_many_self_transactions(client, to_address, 1).await.unwrap();
+    Ok(transactions[0].clone())
+}
 
+pub async fn create_many_self_transactions(
+    client: &Client,
+    to_address: &Address,
+    count: usize,
+) -> Result<Vec<Transaction>, Box<dyn Error>> {
+    let mut transactions = Vec::with_capacity(count);
+
+    let unspent: Vec<UnspentOutput> = client.call("listunspent", &[])?;
+    for (i, utxo) in unspent.iter().enumerate() {
+        if i >= count {
+            break;
+        }
+
+        let amount = Amount::from_btc(utxo.amount).unwrap() - Amount::from_sat(DEFAULT_FEE);
+        println!("Creating transfer of {} to {}", amount, to_address);
+        let tx = create_transaction(client, to_address, utxo, amount.clone())?;
+
+        transactions.push(tx);
+    }
+
+    Ok(transactions)
+}
+
+pub fn create_transaction(
+    client: &Client,
+    to_address: &Address,
+    utxo: &UnspentOutput,
+    amount: Amount,
+) -> Result<Transaction, Box<dyn Error>> {
     let inputs = {
         vec![Input {
             txid: utxo.txid.parse()?,
@@ -41,9 +68,7 @@ pub async fn create_transaction(
             sequence: Some(Sequence::MAX),
         }]
     };
-    let outputs = [
-        Output::new(to_address.clone(), amount),
-    ];
+    let outputs = [Output::new(to_address.clone(), amount)];
 
     let raw_tx = client.create_raw_transaction(&inputs, &outputs)?;
 

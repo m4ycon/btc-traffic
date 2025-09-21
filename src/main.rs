@@ -9,7 +9,10 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::utils::mutated_block::create_mutated_block_4;
+use crate::utils::mutated_block::{
+    self, create_mutated_block_1, create_mutated_block_2, create_mutated_block_3,
+    create_mutated_block_4, create_mutated_block_5,
+};
 use crate::utils::wallet_funds::add_wallet_funds;
 
 mod utils;
@@ -152,9 +155,9 @@ async fn main() {
 
     // network maturity to make above coinbase transaction valid
     // TODO: refactor it to make a global balance so we avoid this solution
-    network.mine(Some(100));
+    network.mine(Some(105));
 
-    let mutated_block = create_mutated_block_4(&peer.client, &wallet_funds.address)
+    let mutated_block = create_mutated_block_2(&peer.client, &wallet_funds.address)
         .await
         .unwrap();
 
