@@ -4,3 +4,10 @@
 .direnv
 
 /.pre-commit-config.yaml
+
+.vscode/
+.idea/
+*.iml
+.eclipse/
+*.sublime-*
+.zed/
